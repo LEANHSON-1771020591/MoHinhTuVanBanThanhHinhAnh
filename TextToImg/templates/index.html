@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text to Image App</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            color: #F8FAFC;
+            min-height: 100vh;
+        }
+        .btn {
+            background-color: #4F46E5;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background-color: #4338CA;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        .input-container {
+            position: relative;
+            margin-bottom: 2rem;
+        }
+        .slider-container {
+            background: rgba(31, 41, 55, 0.5);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .image-container {
+            min-height: 384px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(31, 41, 55, 0.5);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 2rem;
+        }
+        .generated-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.5rem;
+            transition: transform 0.3s ease;
+        }
+        .generated-image:hover {
+            transform: scale(1.02);
+        }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-3xl mx-auto">
+        <h1 class="text-4xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-500">Text to Image Generator</h1>
+        
+        <form method="POST" action="/generate" class="space-y-6" id="imageForm">
+            <div class="input-container">
+                <input type="text" name="prompt" placeholder="Nhập mô tả ảnh của bạn..." 
+                       class="w-full p-4 rounded-lg bg-gray-800 border-2 border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg"
+                       required>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="slider-container">
+                    <label class="block text-gray-300 mb-3 font-medium">Guidance Scale</label>
+                    <input type="range" name="guidance_scale" min="1" max="20" value="7" step="0.5" 
+                           class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" id="guidanceScaleSlider">
+                    <div class="flex justify-between text-sm text-gray-400 mt-2">
+                        <span>1</span>
+                        <span id="guidanceScaleValue" class="font-medium">7</span>
+                        <span>20</span>
+                    </div>
+                </div>
+                
+                <div class="slider-container">
+                    <label class="block text-gray-300 mb-3 font-medium">Số bước inference</label>
+                    <input type="range" name="num_steps" min="1" max="100" value="20" 
+                           class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" id="inferenceStepsSlider">
+                    <div class="flex justify-between text-sm text-gray-400 mt-2">
+                        <span>1</span>
+                        <span id="inferenceStepsValue" class="font-medium">20</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            
+            <p class="text-center text-sm text-gray-400 mb-4">Mô hình: Stable Diffusion </p>
+            
+            <button type="submit" class="btn w-full py-4 px-6 rounded-lg font-medium text-white flex items-center justify-center space-x-2" id="submitBtn">
+                <span id="btnText">Tạo Ảnh</span>
+                <svg id="loadingSpinner" class="animate-spin h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
+        </form>
+
+        {% if error %}
+        <div class="mt-4 p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-red-500 text-center">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <div class="image-container">
+            {% if image_path %}
+                <div class="text-center">
+                    <img src="{{ url_for('output_file', filename=image_path.split('/')[-1]) }}" 
+                         alt="Generated Image" 
+                         class="generated-image shadow-lg">
+                    <p class="text-gray-400 mt-4">⏱️ Thời gian xử lý: {{ "%.2f"|format(processing_time) }} giây</p>
+                </div>
+            {% else %}
+                <p class="text-gray-400">Ảnh được tạo sẽ hiển thị tại đây</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('imageForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const guidanceScaleSlider = document.getElementById('guidanceScaleSlider');
+        const guidanceScaleValue = document.getElementById('guidanceScaleValue');
+        const inferenceStepsSlider = document.getElementById('inferenceStepsSlider');
+        const inferenceStepsValue = document.getElementById('inferenceStepsValue');
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            submitBtn.disabled = true;
+            btnText.textContent = 'Đang xử lý...';
+            loadingSpinner.classList.remove('hidden');
+            
+            try {
+                const formData = new FormData(form);
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const imageContainer = document.querySelector('.image-container');
+                    imageContainer.innerHTML = `
+                        <div class="text-center">
+                            <img src="${result.image_path}" 
+                                 alt="Generated Image" 
+                                 class="generated-image shadow-lg">
+                        </div>
+                    `;
+                } else {
+                    alert(`Lỗi: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`Lỗi: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = 'Tạo Ảnh';
+                loadingSpinner.classList.add('hidden');
+            }
+        });
+
+        guidanceScaleSlider.addEventListener('input', function() {
+            guidanceScaleValue.textContent = this.value;
+        });
+
+        inferenceStepsSlider.addEventListener('input', function() {
+            inferenceStepsValue.textContent = this.value;
+        });
+
+
+    </script>
+</body>
+</html>
